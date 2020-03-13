@@ -457,7 +457,7 @@ class LaxBackedNumpyTests(jtu.JaxTestCase):
     return f
 
   def _CompileAndCheck(self, fun, args_maker, check_dtypes,
-                       rtol=None, atol=None):
+                       rtol=None, atol=None, check_incomplete_shape=False):
     """Helper method for running compilation and allclose assertions."""
     args = args_maker()
 
@@ -505,6 +505,26 @@ class LaxBackedNumpyTests(jtu.JaxTestCase):
     compiled_ans = cfun(*args)
 
     self.assertAllClose(python_ans, compiled_ans, check_dtypes, atol, rtol)
+
+    if check_incomplete_shape:
+      # Check partial shapes with known ranks
+      specs = [tf.TensorSpec([None] * len(x.shape), x.dtype) for x in args]
+      @tf.function(input_signature=specs, autograph=False)
+      def cfun_partial_shape(*args):
+        args = [lnp.asarray(x) for x in args]
+        return fun(*args)
+      compiled_ans = cfun_partial_shape(
+          *[tf.convert_to_tensor(x) for x in args])
+      self.assertAllClose(python_ans, compiled_ans, check_dtypes, atol, rtol)
+      # Check unknown ranks
+      specs = [tf.TensorSpec(None, x.dtype) for x in args]
+      @tf.function(input_signature=specs, autograph=False)
+      def cfun_unknown_shape(*args):
+        args = [lnp.asarray(x) for x in args]
+        return fun(*args)
+      compiled_ans = cfun_unknown_shape(
+          *[tf.convert_to_tensor(x) for x in args])
+      self.assertAllClose(python_ans, compiled_ans, check_dtypes, atol, rtol)
 
   @named_parameters(itertools.chain.from_iterable(
       jtu.cases_from_list(
@@ -822,7 +842,6 @@ class LaxBackedNumpyTests(jtu.JaxTestCase):
           ("tensor-tensor", (5, 3, 4), (5, 4, 1)),
           ("tensor-tensor-broadcast", (3, 1, 3, 4), (5, 4, 1))]
       for lhs_dtype, rhs_dtype in CombosWithReplacement(number_dtypes, 2)))
-  @disable
   def testMatmul(self, lhs_shape, lhs_dtype, rhs_shape, rhs_dtype, rng_factory):
     rng = rng_factory()
     def onp_fun(x, y):
@@ -836,7 +855,7 @@ class LaxBackedNumpyTests(jtu.JaxTestCase):
     self._CheckAgainstNumpy(onp_fun, lnp.matmul, args_maker,
                             check_dtypes=True, tol=tol)
     self._CompileAndCheck(lnp.matmul, args_maker, check_dtypes=True, atol=tol,
-                          rtol=tol)
+                          rtol=tol, check_incomplete_shape=True)
 
   @named_parameters(jtu.cases_from_list(
       {"testcase_name": "_{}_{}_{}".format(
