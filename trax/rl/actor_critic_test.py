@@ -55,7 +55,7 @@ class ActorCriticTest(absltest.TestCase):
     self.assertEqual(1, trainer.current_epoch)
     self.assertGreater(trainer.avg_returns[-1], 180.0)
 
-  def test_a2ctrainer_cartpole(self):
+  def test_sanity_a2ctrainer_cartpole(self):
     """Test-runs a2c on cartpole."""
     task = rl_task.RLTask('CartPole-v0', initial_trajectories=1,
                           max_steps=2)
@@ -81,6 +81,49 @@ class ActorCriticTest(absltest.TestCase):
         collect_per_epoch=2)
     trainer.run(2)
     self.assertEqual(2, trainer.current_epoch)
+
+  def test_a2ctrainer_cartpole(self):
+    """Run a2c and check whether it reaches 200 points."""
+
+    task = rl_task.RLTask(
+        'CartPole-v1', initial_trajectories=750, max_steps=200)
+
+    policy_model = lambda mode: tl.Serial(  # pylint: disable=g-long-lambda
+        tl.Dense(64),
+        tl.Relu(),
+        tl.Dense(2),
+        tl.LogSoftmax())
+
+    lr = lambda h: lr_schedules.MultifactorSchedule(  # pylint: disable=g-long-lambda
+        h, constant=1e-3,
+        warmup_steps=100,
+        factors='constant * linear_warmup')
+
+    value_model = lambda mode: tl.Serial(tl.Dense(64), tl.Relu(), tl.Dense(1))
+    trainer = actor_critic.AdvantageActorCriticTrainer(
+        task,
+        n_shared_layers=1,
+        value_model=value_model,
+        value_optimizer=opt.Adam,
+        value_lr_schedule=lr,
+        value_batch_size=128,
+        value_train_steps_per_epoch=10,
+        policy_model=policy_model,
+        policy_optimizer=opt.Adam,
+        policy_lr_schedule=lr,
+        policy_batch_size=128,
+        policy_train_steps_per_epoch=10,
+        collect_per_epoch=10)
+
+    for ep in range(200):
+      trainer.run(1)
+      self.assertEqual(trainer.current_epoch, ep + 1)
+      if trainer.avg_returns[-1] == 200.0:
+        return
+    self.fail(
+        'The expected score of 200 has not been reached. '
+        'Maximum was {}.'.format(max(trainer.avg_returns))
+    )
 
 
 if __name__ == '__main__':
